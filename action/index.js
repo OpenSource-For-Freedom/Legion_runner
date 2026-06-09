@@ -740,7 +740,7 @@ async function post() {
     md += `\n_${rows.length} unique destination(s) observed._`;
     if (unresolved) {
       const tip = st.dns && st.dns.active
-        ? "connected by raw IP (no DNS lookup), so no domain is known"
+        ? "no name resolved — a raw-IP connection, or a name resolved via systemd-resolved (which bypasses the capture forwarder); no PTR record either"
         : "had no PTR record — enable `dns-capture` for exact domains";
       md += ` _(${unresolved} ${tip}.)_`;
     }
