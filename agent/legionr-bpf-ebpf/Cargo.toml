@@ -7,7 +7,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
-aya-ebpf = { git = "https://github.com/aya-rs/aya" }
+aya-ebpf = { git = "https://github.com/aya-rs/aya", rev = "a0b8d491" }
 legionr-bpf-common = { path = "../legionr-bpf-common" }
 
 [[bin]]

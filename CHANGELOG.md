@@ -30,10 +30,12 @@ Unreleased section.
 - **eBPF capture (Rust/aya)**: `agent/` ships `legionr-bpf`, a pure-Rust eBPF
   agent (tracepoint on `sys_enter_connect`) that captures outbound connections
   at the socket layer — bypass-proof (nss-resolve/systemd-resolved can't evade
-  it) and with **process attribution** (PID + comm). The action uses it when
-  present and falls back to the `ss`/`/proc` sampler otherwise. Built/validated
-  in its own `ebpf-agent` workflow (nightly + bpf-linker); kept out of the main
-  workspace so the core build stays toolchain-light.
+  it) and with **process attribution** (PID + comm). With `ebpf: auto` (default)
+  the action uses a local binary if present, else best-effort downloads the
+  agent from the latest release; it falls back to the `ss`/`/proc` sampler if
+  unavailable. The release workflow builds + attaches the agent binary; aya is
+  pinned to a fixed rev. Built/validated in its own `ebpf-agent` workflow
+  (nightly + bpf-linker), kept out of the main workspace.
 - **Blocked-attempt visibility**: block mode logs denied packets (rate-limited
   iptables/ip6tables LOG) and the job summary lists what was denied (mapped to
   domains via the DNS map / PTR) instead of dropping silently.

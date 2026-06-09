@@ -123,3 +123,29 @@ jobs:
           git push origin -f "refs/tags/${major}"
           echo "Moved ${major} → ${GITHUB_SHA}"
 
+  # ── Build the eBPF agent and attach it to the release ──────────────────────
+  # The action downloads this (latest release asset) at runtime so `ebpf: auto`
+  # engages without the consumer installing anything.
+  agent:
+    name: Build & attach legionr-bpf
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    env:
+      GH_TOKEN: ${{ github.token }}
+    defaults:
+      run:
+        working-directory: agent
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@nightly
+        with:
+          components: rust-src
+      - name: Install bpf-linker
+        run: cargo install bpf-linker --locked
+      - name: Build agent (release)
+        run: cargo build --release
+      - name: Attach binary to the release
+        run: gh release upload "${{ needs.release.outputs.tag }}" target/release/legionr-bpf --clobber
+

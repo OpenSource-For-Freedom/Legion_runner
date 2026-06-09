@@ -226,13 +226,13 @@ async function cacheSaveDomains(domains) {
 // Socket-layer connection capture that can't be bypassed by nss-resolve. Writes
 // "LEGIONC ip port pid comm" lines to its log. Falls back silently when eBPF is
 // unavailable (the ss//proc sampler still runs).
-function startEbpf(connectLog) {
+function startEbpf(connectLog, bin) {
   const out = { active: false, log: connectLog };
   try {
-    if (!ebpf.available()) return out;
+    if (!bin) return out;
     fs.writeFileSync(connectLog, "");
     const fd = fs.openSync(connectLog, "a");
-    const child = spawnPrivileged(ebpf.binPath(), [], {
+    const child = spawnPrivileged(bin, [], {
       detached: true,
       stdio: ["ignore", fd, "ignore"],
     });
@@ -545,7 +545,8 @@ async function main() {
   // The ss//proc sampler above stays as a fallback when eBPF is unavailable.
   let ebpfCap = { active: false, log: "" };
   if (input("ebpf", "auto").toLowerCase() !== "off") {
-    ebpfCap = startEbpf(path.join(os.tmpdir(), "legion-connect.log"));
+    const bin = await ebpf.ensureBinary(); // local, else best-effort download
+    ebpfCap = startEbpf(path.join(os.tmpdir(), "legion-connect.log"), bin);
   }
 
   let enforced = false;
