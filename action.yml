@@ -5,7 +5,7 @@ description: >-
 author: 'Legion'
 branding:
   icon: 'shield'
-  color: 'purple'
+  color: 'green'
 
 inputs:
   egress-policy:
