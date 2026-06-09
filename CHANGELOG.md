@@ -27,6 +27,13 @@ Unreleased section.
   the learned baseline is persisted in the GitHub Actions cache *inside the
   action*, so audit→block needs no committed file or extra workflow (an optional
   committed `.legion/egress-allowed.txt` is supported for teams who want it).
+- **eBPF capture (Rust/aya)**: `agent/` ships `legionr-bpf`, a pure-Rust eBPF
+  agent (tracepoint on `sys_enter_connect`) that captures outbound connections
+  at the socket layer — bypass-proof (nss-resolve/systemd-resolved can't evade
+  it) and with **process attribution** (PID + comm). The action uses it when
+  present and falls back to the `ss`/`/proc` sampler otherwise. Built/validated
+  in its own `ebpf-agent` workflow (nightly + bpf-linker); kept out of the main
+  workspace so the core build stays toolchain-light.
 - **Blocked-attempt visibility**: block mode logs denied packets (rate-limited
   iptables/ip6tables LOG) and the job summary lists what was denied (mapped to
   domains via the DNS map / PTR) instead of dropping silently.

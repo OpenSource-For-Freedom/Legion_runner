@@ -1,0 +1,14 @@
+# Legion Runner — eBPF capture agent (aya). Separate workspace so the eBPF
+# toolchain (nightly + bpf-linker) never affects the main `cargo build`.
+[workspace]
+resolver = "2"
+members = ["legionr-bpf", "legionr-bpf-common", "legionr-bpf-ebpf"]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2021"
+license = "MIT"
+
+[profile.release]
+# eBPF programs must keep debug info (BTF) and not be stripped.
+debug = 2

@@ -17,6 +17,7 @@ const fs = require("node:fs");
 const os = require("node:os");
 const path = require("node:path");
 const cache = require("./cache.js");
+const ebpf = require("./ebpf.js");
 
 // GitHub + Actions endpoints a job almost always needs. Kept in sync with
 // legionr-core's harden::GITHUB_EGRESS.
@@ -219,6 +220,30 @@ async function cacheSaveDomains(domains) {
   } catch {
     /* best-effort */
   }
+}
+
+// ── eBPF capture (preferred) ────────────────────────────────────────────────
+// Socket-layer connection capture that can't be bypassed by nss-resolve. Writes
+// "LEGIONC ip port pid comm" lines to its log. Falls back silently when eBPF is
+// unavailable (the ss//proc sampler still runs).
+function startEbpf(connectLog) {
+  const out = { active: false, log: connectLog };
+  try {
+    if (!ebpf.available()) return out;
+    fs.writeFileSync(connectLog, "");
+    const fd = fs.openSync(connectLog, "a");
+    const child = spawnPrivileged(ebpf.binPath(), [], {
+      detached: true,
+      stdio: ["ignore", fd, "ignore"],
+    });
+    out.pid = child.pid;
+    child.unref();
+    out.active = true;
+    info("   eBPF capture active (legionr-bpf: kprobe tcp_connect — socket-layer, bypass-proof)");
+  } catch (e) {
+    warn(`eBPF capture unavailable (${e.message}); using the ss//proc sampler`);
+  }
+  return out;
 }
 
 // ── Egress monitor ──────────────────────────────────────────────────────────
@@ -454,6 +479,24 @@ function stopDnsCapture(dns) {
   }
 }
 
+/// Stop the eBPF (bpftrace) capture; best-effort.
+function stopEbpf(cap) {
+  if (!cap || !cap.active) return;
+  if (cap.pid) {
+    try {
+      sudo(["kill", String(cap.pid)]);
+      return;
+    } catch {
+      /* fall through */
+    }
+  }
+  try {
+    sudo(["pkill", "-f", "bpftrace"]);
+  } catch {
+    /* nothing to kill */
+  }
+}
+
 // ── main ────────────────────────────────────────────────────────────────────
 async function main() {
   const policy = input("egress-policy", "audit").toLowerCase();
@@ -498,6 +541,13 @@ async function main() {
   fs.writeFileSync(logFile, "");
   const pid = startMonitor(logFile, interval);
 
+  // Preferred capture: eBPF (socket-layer, bypass-proof, with process names).
+  // The ss//proc sampler above stays as a fallback when eBPF is unavailable.
+  let ebpfCap = { active: false, log: "" };
+  if (input("ebpf", "auto").toLowerCase() !== "off") {
+    ebpfCap = startEbpf(path.join(os.tmpdir(), "legion-connect.log"));
+  }
+
   let enforced = false;
   if (block) {
     try {
@@ -531,6 +581,7 @@ async function main() {
       ipToHost,
       allowIps: [...v4, ...v6],
       dns: dnsCap,
+      ebpf: ebpfCap,
       policyFile,
       policyFileRel,
       learn,
@@ -575,21 +626,42 @@ async function post() {
     /* already gone */
   }
   stopDnsCapture(st.dns);
+  stopEbpf(st.ebpf);
 
-  // Tally observed peers as ip|port (IPv4-mapped IPv6 normalized to IPv4).
+  // Tally observed peers as ip|port. Prefer the eBPF connect log (reliable +
+  // process names); fall back to the ss//proc sampler. procMap: ip -> Set(comm).
   const counts = new Map();
-  try {
-    for (const line of fs.readFileSync(st.logFile, "utf8").split("\n")) {
-      const peer = line.trim();
-      if (!peer.includes(":")) continue;
-      const parsed = splitPeer(peer);
-      const ip = normalizeIp(parsed.ip);
-      if (!ip || isLocal(ip)) continue;
-      const key = `${ip}|${parsed.port}`;
-      counts.set(key, (counts.get(key) || 0) + 1);
+  const procMap = new Map();
+  let usedEbpf = false;
+  if (st.ebpf && st.ebpf.active) {
+    try {
+      for (const line of fs.readFileSync(st.ebpf.log, "utf8").split("\n")) {
+        const c = ebpf.parseConnect(line);
+        if (!c) continue;
+        const ip = normalizeIp(c.ip);
+        if (!ip || isLocal(ip)) continue;
+        counts.set(`${ip}|${c.port}`, (counts.get(`${ip}|${c.port}`) || 0) + 1);
+        if (!procMap.has(ip)) procMap.set(ip, new Set());
+        if (c.comm) procMap.get(ip).add(c.comm);
+        usedEbpf = true;
+      }
+    } catch {
+      /* fall back to sampler */
     }
-  } catch {
-    /* no log */
+  }
+  if (!usedEbpf) {
+    try {
+      for (const line of fs.readFileSync(st.logFile, "utf8").split("\n")) {
+        const peer = line.trim();
+        if (!peer.includes(":")) continue;
+        const parsed = splitPeer(peer);
+        const ip = normalizeIp(parsed.ip);
+        if (!ip || isLocal(ip)) continue;
+        counts.set(`${ip}|${parsed.port}`, (counts.get(`${ip}|${parsed.port}`) || 0) + 1);
+      }
+    } catch {
+      /* no log */
+    }
   }
 
   // Resolve hostnames, best source first:
@@ -621,37 +693,48 @@ async function post() {
         host: host || null,
         ips: new Set(),
         ports: new Set(),
+        procs: new Set(),
         conns: 0,
         decision: decisionFor(st, allow, ip),
       };
     g.ips.add(ip);
     if (port) g.ports.add(port);
+    for (const c of procMap.get(ip) || []) g.procs.add(c);
     g.conns += n;
     groups.set(dest, g);
   }
   const rows = [...groups.entries()].sort((a, b) => b[1].conns - a[1].conns);
   const unresolved = rows.filter(([, g]) => !g.host).length;
 
+  const captureLayer = usedEbpf ? "eBPF (tcp_connect)" : "ss//proc sampler";
   const captureMode = st.dns && st.dns.active ? "DNS capture" : "reverse DNS";
   const LOGO =
     "https://raw.githubusercontent.com/OpenSource-For-Freedom/legion_runner/main/assets/logo.jpg";
   let md = `<div align="center"><img src="${LOGO}" alt="Legion" width="120"/></div>\n\n`;
   md += "## 🛡 Legion Harden Runner — outbound connections\n\n";
   md += `**Egress policy:** \`${st.policy}\`${st.enforced ? " (enforced)" : ""}  ·  `;
+  md += `**Capture:** ${captureLayer}  ·  `;
   md += `**Resolution:** ${captureMode}  ·  `;
   md += `**Started:** ${st.startedAt}\n\n`;
 
+  const procCol = usedEbpf; // process attribution only available via eBPF
   if (rows.length === 0) {
     md += "_No outbound connections were observed during this run._\n";
   } else {
-    md += "| Destination | Address | Port(s) | Conns | Decision |\n";
-    md += "|---|---|---|---:|---|\n";
+    md += procCol
+      ? "| Destination | Address | Port(s) | Process | Conns | Decision |\n|---|---|---|---|---:|---|\n"
+      : "| Destination | Address | Port(s) | Conns | Decision |\n|---|---|---|---:|---|\n";
     for (const [dest, g] of rows) {
       const ips = [...g.ips];
       const addr = ips.slice(0, 2).join(", ") + (ips.length > 2 ? `, +${ips.length - 2}` : "");
       const ports = [...g.ports].sort((a, b) => Number(a) - Number(b)).join(", ") || "—";
       const name = g.host ? g.host : `\`${dest}\``;
-      md += `| ${name} | \`${addr}\` | ${ports} | ${g.conns} | ${g.decision} |\n`;
+      if (procCol) {
+        const procs = [...g.procs].slice(0, 3).join(", ") || "—";
+        md += `| ${name} | \`${addr}\` | ${ports} | ${procs} | ${g.conns} | ${g.decision} |\n`;
+      } else {
+        md += `| ${name} | \`${addr}\` | ${ports} | ${g.conns} | ${g.decision} |\n`;
+      }
     }
     md += `\n_${rows.length} unique destination(s) observed._`;
     if (unresolved) {
