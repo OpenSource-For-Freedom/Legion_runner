@@ -1,5 +1,12 @@
 version: 2
+
+# Tool pack: one place Dependabot watches every toolchain surface in the repo.
+# The agent/ eBPF crate is its OWN Cargo workspace (excluded from the root
+# workspace), so it needs its own entry — the root cargo job can't see it.
+# Patch/minor bumps are grouped to cut PR noise and are auto-merged once CI is
+# green (see .github/workflows/dependabot-auto-merge.yml); majors are reviewed.
 updates:
+  # ── Rust: main workspace (legionr-core, legionr-cli, legionr-fim) ──────────
   - package-ecosystem: cargo
     directory: "/"
     schedule:
@@ -9,7 +16,22 @@ updates:
       cargo-minor:
         update-types: ["minor", "patch"]
 
+  # ── Rust: eBPF agent workspace (its own toolchain; aya is git-pinned) ──────
+  - package-ecosystem: cargo
+    directory: "/agent"
+    schedule:
+      interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      agent-minor:
+        update-types: ["minor", "patch"]
+
+  # ── GitHub Actions used across all workflows ───────────────────────────────
   - package-ecosystem: github-actions
     directory: "/"
     schedule:
       interval: weekly
+    open-pull-requests-limit: 5
+    groups:
+      actions-minor:
+        update-types: ["minor", "patch"]

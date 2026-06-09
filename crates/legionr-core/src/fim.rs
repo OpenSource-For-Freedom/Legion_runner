@@ -345,11 +345,21 @@ fn diff_map(
 
 /// Diff the current filesystem against a snapshot. Returns change records sorted
 /// by path. New files are not reported (a build creates many) — only changes to
-/// the tracked tamper targets.
+/// the tracked tamper targets. A path tracked in both scopes (e.g. an
+/// `fim-extra-paths` file that lives inside the workspace) is reported once,
+/// under the higher-severity `sensitive` scope.
 pub fn diff(snap: &Snapshot) -> Vec<Change> {
     let mut out = Vec::new();
     diff_map(&snap.sensitive, "sensitive", u64::MAX, &mut out);
-    diff_map(&snap.source, "source", MAX_FILE_BYTES, &mut out);
+    let sensitive_paths: std::collections::HashSet<&str> =
+        snap.sensitive.keys().map(String::as_str).collect();
+    let mut source_out = Vec::new();
+    diff_map(&snap.source, "source", MAX_FILE_BYTES, &mut source_out);
+    out.extend(
+        source_out
+            .into_iter()
+            .filter(|c| !sensitive_paths.contains(c.path.as_str())),
+    );
     out.sort_by(|a, b| a.path.cmp(&b.path));
     out
 }
@@ -499,5 +509,25 @@ mod tests {
         assert_eq!(changes.len(), 1);
         assert_eq!(changes[0].scope, "sensitive");
         assert_eq!(changes[0].reason, "modified");
+    }
+
+    #[test]
+    fn diff_dedups_path_tracked_in_both_scopes() {
+        // An extra path that lives INSIDE the workspace is captured by both the
+        // sensitive (extra) and source (walk) scopes; it must be reported once,
+        // under sensitive.
+        let dir = tempfile::tempdir().unwrap();
+        let ws = dir.path().join("ws");
+        let home = dir.path().join("home");
+        let secret = ws.join(".npmrc");
+        write(&secret, b"token=keep");
+        let snap = snapshot(&ws, &home, std::slice::from_ref(&secret));
+        assert!(snap.sensitive.contains_key(secret.to_str().unwrap()));
+        assert!(snap.source.contains_key(secret.to_str().unwrap()));
+
+        write(&secret, b"token=STOLEN");
+        let changes = diff(&snap);
+        assert_eq!(changes.len(), 1, "should be deduped to a single record");
+        assert_eq!(changes[0].scope, "sensitive");
     }
 }
