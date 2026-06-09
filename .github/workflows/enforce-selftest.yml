@@ -1,0 +1,61 @@
+name: Enforce self-test (cache round-trip)
+
+# Proves the action's self-contained learn→enforce end to end, across two jobs
+# on separate runners (so the baseline genuinely travels through the GitHub
+# Actions cache, not local disk):
+#   1. learn   — audit run reaches example.com → baseline saved to the cache
+#   2. enforce — block run restores the baseline → example.com is ALLOWED while
+#                an unlearned host (wikipedia) is DENIED.
+
+on:
+  workflow_dispatch:
+  push:
+    branches: ['**']
+    paths:
+      - 'action/**'
+      - '.github/workflows/enforce-selftest.yml'
+
+jobs:
+  learn:
+    name: Learn (audit) → save baseline to cache
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Harden (audit)
+        uses: ./
+        with:
+          egress-policy: audit
+          sample-interval: '1'
+
+      - name: Reach the endpoint we'll later allow
+        run: |
+          curl -sS --max-time 20 -o /dev/null https://example.com && echo "reached example.com"
+          sleep 3   # let the monitor sample + DNS capture record it before post saves
+
+  enforce:
+    name: Enforce (block) → verify allow/deny
+    needs: learn
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Harden (block) — restores the learned baseline from the cache
+        uses: ./
+        with:
+          egress-policy: block
+          sample-interval: '1'
+
+      - name: Learned host allowed, unlearned host denied
+        run: |
+          set +e
+          curl -sS --max-time 25 -o /dev/null https://example.com;        learned=$?
+          curl -sS --max-time 25 -o /dev/null https://www.wikipedia.org;  unlearned=$?
+          echo "example.com (learned)    exit=$learned   (expect 0 = allowed)"
+          echo "wikipedia   (not learned) exit=$unlearned (expect non-zero = denied)"
+          if [ "$learned" -eq 0 ] && [ "$unlearned" -ne 0 ]; then
+            echo "PASS — cache round-trip + domain enforcement verified."
+          else
+            echo "FAIL — allow/deny did not match (cache restore or enforcement issue)."
+            exit 1
+          fi
