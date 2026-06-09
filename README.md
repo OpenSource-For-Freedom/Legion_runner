@@ -9,7 +9,7 @@
   </p>
 </div>
 
-A **hardened, ephemeral, single-use GitHub Actions runner** for Linux : built to
+A **hardened, Rust core, ephemeral, single-use GitHub Actions runner** for Linux : built to
 run with joy, and to forget everything the moment a job ends.
 
 Legion Runner is the CI sibling of [Legion](https://github.com/tbgor/legion),
