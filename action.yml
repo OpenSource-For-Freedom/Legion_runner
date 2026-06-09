@@ -1,7 +1,7 @@
 name: 'Legion Harden Runner'
 description: >-
   Hardened egress filtering and runtime network monitoring for GitHub Actions
-  jobs. Open-source, dependency-free, ephemeral-friendly — a transparent
+  jobs. Open-source, dependency-free, ephemeral
   alternative to proprietary runner-hardening agents.
 author: 'Legion'
 branding:
