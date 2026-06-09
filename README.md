@@ -12,7 +12,7 @@
 A **hardened, Rust core, ephemeral, single-use GitHub Actions runner** for Linux : built to
 run with joy, and to forget everything the moment a job ends.
 
-Legion Runner is the CI sibling of [Legion](https://github.com/tbgor/legion),
+Legion Runner is the CI sibling of [Legion](https://github.com/OpenSource-For-Freedom/legion),
 the agentic local security monitor. Where Legion watches your machine, Legion
 Runner gives you self-hosted CI you can actually trust: every job lands on a
 *fresh* runner that accepts exactly **one** job and then self-destructs. No
