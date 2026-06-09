@@ -401,13 +401,6 @@ async function main() {
   fs.writeFileSync(logFile, "");
   const pid = startMonitor(logFile, interval);
 
-  // Optional DNS capture: route the resolver through a local logging forwarder
-  // so connections map to the exact domains the job resolved (beats reverse DNS).
-  let dnsCap = { active: false, log: "", backup: "" };
-  if (boolInput("dns-capture", true)) {
-    dnsCap = await startDnsCapture();
-  }
-
   let enforced = false;
   if (block) {
     try {
