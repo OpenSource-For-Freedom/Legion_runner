@@ -3,8 +3,8 @@
   <h1>Legion Runner</h1>
   <p><em>Hardened ~ rust-core ~ ephemeral ~ single-use GitHub Actions runner / runs with joy on Linux</em></p>
   <p>
-    <a href="https://github.com/marketplace/actions/legion-harden-runner"><img src="https://img.shields.io/badge/Marketplace-Legion%20Harden%20Runner-2ea44f?logo=github" alt="GitHub Marketplace"></a>
-    <a href="https://github.com/OpenSource-For-Freedom/legion_runner/releases"><img src="https://img.shields.io/github/v/release/OpenSource-For-Freedom/legion_runner?color=22c55e" alt="Latest release"></a>
+    <a href="https://github.com/marketplace/actions/legion-harden-runner"><img src="https://img.shields.io/badge/Marketplace-Legion%20Runner-2ea44f?logo=github" alt="GitHub Marketplace"></a>
+    <a href="https://github.com/OpenSource-For-Freedom/legion_runner/releases/latest"><img src="https://img.shields.io/badge/release-latest-22c55e?logo=github" alt="Latest release"></a>
     <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
   </p>
 </div>
@@ -103,7 +103,7 @@ jobs:
 | `legionr status` | Show config + GitHub/Legion connectivity. |
 | `legionr doctor` | Preflight checks before going live. |
 
-## Use as a GitHub Action (Harden Runner)
+## Use as a GitHub Action
 
 Legion Runner also ships a **drop-in workflow action** that hardens *any* job —
 including GitHub-hosted runners — by monitoring (and optionally blocking)
@@ -116,7 +116,7 @@ tamper detection**.
 
 ```yaml
 steps:
-  - uses: OpenSource-For-Freedom/legion_runner@v1   # Legion Harden Runner
+  - uses: OpenSource-For-Freedom/legion_runner@v1   # Legion Runner
     with:
       egress-policy: audit          # "audit" (monitor only) or "block" (default-deny)
       allowed-endpoints: |          # used in block mode
@@ -133,7 +133,7 @@ steps:
 At the end of the job you get (the **Process** column appears when the eBPF
 agent is active):
 
-> ## 🛡 Legion Harden Runner — outbound connections
+> ## 🛡 Legion Runner — outbound connections
 > **Capture:** eBPF (tcp_connect) · **Resolution:** DNS capture
 >
 > | Destination | Address | Port(s) | Process | Conns | Decision |

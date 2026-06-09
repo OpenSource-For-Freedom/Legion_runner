@@ -172,7 +172,7 @@ function readPolicyFile(p) {
 function writePolicyFile(p, hosts) {
   fs.mkdirSync(path.dirname(p), { recursive: true });
   const body =
-    "# Legion Harden Runner — learned egress allowlist.\n" +
+    "# Legion Runner — learned egress allowlist.\n" +
     "# Commit this file, then set egress-policy: block to deny everything else.\n" +
     "# Regenerate by running an audit job with learn: true.\n" +
     hosts.join("\n") +
@@ -560,11 +560,11 @@ async function main() {
   const workspace = process.env.GITHUB_WORKSPACE || process.cwd();
   const policyFile = policyFileRel ? path.resolve(workspace, policyFileRel) : "";
 
-  info("🛡  Legion Harden Runner");
+  info("🛡  Legion Runner");
   info(`   egress-policy: ${policy}`);
 
   if (os.platform() !== "linux") {
-    warn("Legion Harden Runner enforces only on Linux; skipping on " + os.platform());
+    warn("Legion Runner enforces only on Linux; skipping on " + os.platform());
     saveState("isPost", "true");
     return;
   }
@@ -789,7 +789,7 @@ async function post() {
   const LOGO =
     "https://raw.githubusercontent.com/OpenSource-For-Freedom/legion_runner/main/assets/logo.jpg";
   let md = `<div align="center"><img src="${LOGO}" alt="Legion" width="120"/></div>\n\n`;
-  md += "## 🛡 Legion Harden Runner — outbound connections\n\n";
+  md += "## 🛡 Legion Runner — outbound connections\n\n";
   md += `**Egress policy:** \`${st.policy}\`${st.enforced ? " (enforced)" : ""}  ·  `;
   md += `**Capture:** ${captureLayer}  ·  `;
   md += `**Resolution:** ${captureMode}  ·  `;
@@ -850,7 +850,7 @@ async function post() {
       const changes = fim.runDiff(st.fim.bin, st.fim.snap);
       md += fim.renderChanges(changes);
       if (changes.length) {
-        info(`Legion Harden Runner: ${changes.length} file-integrity change(s) detected.`);
+        info(`Legion Runner: ${changes.length} file-integrity change(s) detected.`);
       }
     } catch (e) {
       md += `\n_File-integrity diff failed: ${e.message}_\n`;
@@ -894,7 +894,7 @@ async function post() {
   }
 
   summary(md);
-  info(`Legion Harden Runner: reported ${rows.length} outbound destination(s).`);
+  info(`Legion Runner: reported ${rows.length} outbound destination(s).`);
 
   await emit(st.link, {
     runner: process.env.RUNNER_NAME || "github-hosted",
@@ -958,7 +958,7 @@ if (require.main === module) {
       if (process.env.STATE_isPost === "true") await post();
       else await main();
     } catch (e) {
-      warn(`Legion Harden Runner error: ${e.stack || e}`);
+      warn(`Legion Runner error: ${e.stack || e}`);
     }
   })();
 }
