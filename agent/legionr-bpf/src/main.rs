@@ -31,9 +31,6 @@ fn format_event(e: &ConnEvent) -> Option<String> {
 }
 
 fn main() -> anyhow::Result<()> {
-    // Raise the memlock rlimit so older kernels can load the maps.
-    let _ = aya::util::set_memlock_limit(u64::MAX);
-
     let mut bpf = Ebpf::load(aya::include_bytes_aligned!(concat!(
         env!("OUT_DIR"),
         "/legionr-bpf"
