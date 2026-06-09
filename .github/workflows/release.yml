@@ -158,7 +158,16 @@ jobs:
         with:
           components: rust-src
       - name: Install bpf-linker
-        run: cargo install bpf-linker --locked
+        # Compiled against the toolchain's LLVM (a prebuilt could mismatch the
+        # nightly), so keep `cargo install` but retry — the crates.io download
+        # can fail transiently (TLS EOF), which would otherwise fail the job.
+        run: |
+          for i in 1 2 3; do
+            cargo install bpf-linker --locked && exit 0
+            echo "bpf-linker install attempt $i failed; retrying in $((i*10))s"
+            sleep $((i*10))
+          done
+          echo "bpf-linker install failed after 3 attempts"; exit 1
       - name: Build agent (release)
         run: cargo build --release
       - name: Attach binary to the release
