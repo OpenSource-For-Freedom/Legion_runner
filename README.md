@@ -175,6 +175,13 @@ and re-learn.
     egress-policy: block   # deny anything not in .legion/egress-allowed.txt
 ```
 
+In block mode with `dns-capture` on (the default), enforcement is **by domain**:
+as an allowlisted domain resolves, the firewall is opened for *its current IPs*
+before the connection is made. So CDN/cloud endpoints that rotate IPs
+(`*.crates.io`, apt mirrors) keep working without pinning addresses, while
+everything else is dropped. Allowlist entries match subdomains too
+(`github.com` allows `api.github.com`).
+
 Drive the toggle without editing the workflow by reading a repo variable, so
 flipping `LEGION_EGRESS` to `block` enforces fleet-wide:
 
