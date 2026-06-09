@@ -22,7 +22,9 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Harden (block) with an inline allowlist
-        uses: OpenSource-For-Freedom/legion_runner@v1
+        # Tests THIS repo's enforcement code (not the published action) — that's
+        # the point of the self-test. Consumers reference the Marketplace @v1.
+        uses: ./
         with:
           egress-policy: block
           allowed-endpoints: |
