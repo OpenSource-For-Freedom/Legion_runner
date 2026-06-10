@@ -1,17 +1,18 @@
 name: Release on main
 
-# Every push to main: verify the workspace, and only on success auto-bump the
-# patch version, tag it, cut a GitHub Release, and advance the moving major tag
-# (v1) so `uses: OpenSource-For-Freedom/legion_runner@v1` keeps resolving.
+# Runs ONLY after the CI workflow succeeds on main (via workflow_run), so the
+# full CI suite — rust, action tests, shellcheck, security audit, supply-chain —
+# must pass before anything is released. Then it auto-bumps the patch version,
+# tags it, cuts a GitHub Release, advances the moving major tag (v1), and builds
+# + attaches the checksummed legionr-bpf / legionr-fim binaries.
 #
-# Versioning is SemVer (MAJOR.MINOR.PATCH). First release defaults to 1.0.0 if
-# no tag exists yet. The bump is chosen by: workflow_dispatch input, else a
-# commit-message marker ([major]/[minor]) on the head commit, else patch. So a
-# feature drop is released as a minor by merging with "[minor]" in the commit;
-# routine pushes stay patch.
+# Versioning is SemVer. First release defaults to 1.0.0. The bump is: dispatch
+# input → commit-message marker ([major]/[minor]) → patch.
 
 on:
-  push:
+  workflow_run:
+    workflows: ["CI"]
+    types: [completed]
     branches: [main]
   workflow_dispatch:
     inputs:
@@ -26,48 +27,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  # ── Gate: the release only happens if this passes ──────────────────────────
-  verify:
-    name: Verify
-    runs-on: ubuntu-latest
-    timeout-minutes: 20   # hard cap: never let a hung job run to the 6h default
-    steps:
-      - uses: actions/checkout@v6
-      - name: Harden runner (Legion)
-        uses: OpenSource-For-Freedom/legion_runner@v1   # Marketplace action
-        with:
-          # INTERIM: audit (monitor only) so the release pipeline can't be blocked
-          # by the @v1 teardown hang OR by block dropping rotating CDN IPs (crates).
-          # This release SHIPS the teardown fix; flip to block + dns-capture once
-          # @v1 carries it.
-          egress-policy: audit
-          ebpf: 'off'
-          dns-capture: 'off'
-      - uses: dtolnay/rust-toolchain@stable
-        with:
-          components: clippy, rustfmt
-      - run: cargo fmt --all -- --check
-      - run: cargo clippy --all-targets --all-features -- -D warnings
-      - run: cargo test --workspace
-      - name: Check action JS
-        run: |
-          node --check action/index.js
-          node --check action/monitor.js
-
   release:
     name: Tag & release
-    needs: verify
+    # GATE: only release when CI succeeded (or on a manual dispatch). A failed or
+    # cancelled CI run still fires workflow_run, but this condition skips it.
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
+    timeout-minutes: 15
     permissions:
       contents: write   # create tags + releases
     outputs:
       tag: ${{ steps.ver.outputs.tag }}
       major: ${{ steps.ver.outputs.major }}
+      sha: ${{ steps.ver.outputs.sha }}
     env:
       GH_TOKEN: ${{ github.token }}
+      # The exact commit CI validated (workflow_run) or the dispatch target.
+      SHA: ${{ github.event.workflow_run.head_sha || github.sha }}
     steps:
       - uses: actions/checkout@v6
         with:
+          ref: ${{ github.event.workflow_run.head_sha || github.sha }}
           fetch-depth: 0
           fetch-tags: true
 
@@ -75,16 +55,15 @@ jobs:
         id: ver
         run: |
           set -euo pipefail
+          echo "sha=${SHA}" >> "$GITHUB_OUTPUT"
           # Highest existing vMAJOR.MINOR.PATCH tag, or empty.
           latest="$(git tag -l 'v[0-9]*.[0-9]*.[0-9]*' \
                     | grep -E '^v[0-9]+\.[0-9]+\.[0-9]+$' | sort -V | tail -1 || true)"
 
-          # Bump precedence: workflow_dispatch input → commit-message marker
-          # ([major]/[minor]) → patch. So a feature drop is cut by putting
-          # "[minor]" in the merge commit; routine pushes stay patch.
+          # Bump precedence: dispatch input → commit-message marker → patch.
           bump="${{ github.event.inputs.bump || '' }}"
           if [ -z "$bump" ]; then
-            msg="$(git log -1 --format=%B 2>/dev/null || true)"
+            msg="$(git log -1 --format=%B "$SHA" 2>/dev/null || true)"
             case "$msg" in
               *'[major]'*) bump=major ;;
               *'[minor]'*) bump=minor ;;
@@ -105,14 +84,13 @@ jobs:
             next="${MA}.${MI}.${PA}"
           fi
 
-          echo "Previous: ${latest:-<none>}  →  Next: v${next}"
+          echo "Previous: ${latest:-<none>}  →  Next: v${next}  (commit ${SHA})"
           echo "tag=v${next}" >> "$GITHUB_OUTPUT"
           echo "major=v${next%%.*}" >> "$GITHUB_OUTPUT"
 
       - name: Build release notes from CHANGELOG
         run: |
           set -euo pipefail
-          # Body = the [Unreleased] section of CHANGELOG.md, if present.
           awk '/^## \[Unreleased\]/{f=1;next} /^## \[/{f=0} f' CHANGELOG.md \
             | sed '/./,$!d' > /tmp/notes.md || true
           if [ -s /tmp/notes.md ]; then
@@ -130,10 +108,10 @@ jobs:
             exit 0
           fi
           if [ -s /tmp/notes.md ]; then
-            gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" \
+            gh release create "$tag" --target "$SHA" --title "$tag" \
               --notes-file /tmp/notes.md --latest
           else
-            gh release create "$tag" --target "$GITHUB_SHA" --title "$tag" \
+            gh release create "$tag" --target "$SHA" --title "$tag" \
               --generate-notes --latest
           fi
 
@@ -141,21 +119,17 @@ jobs:
         run: |
           set -euo pipefail
           major="${{ steps.ver.outputs.major }}"
-          # Forward-only: never let a stale/queued run move the major tag backward
-          # to an older commit. Only advance if the current tag is an ancestor of
-          # this commit (or the tag doesn't exist yet).
+          # Forward-only: never move the major tag backward to an older commit.
           if git rev-parse -q --verify "refs/tags/${major}" >/dev/null; then
-            if ! git merge-base --is-ancestor "refs/tags/${major}" "$GITHUB_SHA"; then
-              echo "Refusing to move ${major} backward from $(git rev-parse --short ${major}) to ${GITHUB_SHA}"; exit 0
+            if ! git merge-base --is-ancestor "refs/tags/${major}" "$SHA"; then
+              echo "Refusing to move ${major} backward from $(git rev-parse --short "$major") to ${SHA}"; exit 0
             fi
           fi
-          git tag -f "$major" "$GITHUB_SHA"
+          git tag -f "$major" "$SHA"
           git push origin -f "refs/tags/${major}"
-          echo "Moved ${major} → ${GITHUB_SHA}"
+          echo "Moved ${major} → ${SHA}"
 
-  # ── Build the eBPF agent and attach it to the release ──────────────────────
-  # The action downloads this (latest release asset) at runtime so `ebpf: auto`
-  # engages without the consumer installing anything.
+  # ── Build the eBPF agent and attach it (+ checksum) to the release ──────────
   agent:
     name: Build & attach legionr-bpf
     needs: release
@@ -169,13 +143,14 @@ jobs:
         working-directory: agent
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release.outputs.sha }}
       - uses: dtolnay/rust-toolchain@nightly
         with:
           components: rust-src
       - name: Install bpf-linker
-        # Compiled against the toolchain's LLVM (a prebuilt could mismatch the
-        # nightly), so keep `cargo install` but retry — the crates.io download
-        # can fail transiently (TLS EOF), which would otherwise fail the job.
+        # Compiled against the toolchain's LLVM; retry to ride out transient
+        # crates.io download failures.
         run: |
           for i in 1 2 3; do
             cargo install bpf-linker --locked && exit 0
@@ -191,10 +166,7 @@ jobs:
           sha256sum legionr-bpf > legionr-bpf.sha256
           gh release upload "${{ needs.release.outputs.tag }}" legionr-bpf legionr-bpf.sha256 --clobber
 
-  # ── Build the file-integrity agent and attach it to the release ────────────
-  # legionr-fim is plain stable Rust (no eBPF toolchain), built from the main
-  # workspace. The action downloads it at runtime so `file-integrity: auto`
-  # engages without the consumer installing anything.
+  # ── Build the file-integrity agent and attach it (+ checksum) to the release ─
   fim:
     name: Build & attach legionr-fim
     needs: release
@@ -205,6 +177,8 @@ jobs:
       GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v6
+        with:
+          ref: ${{ needs.release.outputs.sha }}
       - uses: dtolnay/rust-toolchain@stable
       - name: Build legionr-fim (release)
         run: cargo build --release -p legionr-fim
@@ -213,4 +187,3 @@ jobs:
           cd target/release
           sha256sum legionr-fim > legionr-fim.sha256
           gh release upload "${{ needs.release.outputs.tag }}" legionr-fim legionr-fim.sha256 --clobber
-
