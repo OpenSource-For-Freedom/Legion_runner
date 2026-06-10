@@ -1,7 +1,7 @@
 <div align="center">
   <img src="assets/rust.PNG" alt="Legion Runner" width="420"/>
   <h1>Legion Runner</h1>
-  <p><strong>"Come try and decompile this runner, we dare you." - Legion</strong></p>
+  <p><strong>"Not your standard Actions Runner" - Legion</strong></p>
   <p><em>Harden any GitHub Actions runner: monitor and block egress, detect tampering, attribute connections to processes. Open, dependency-free, runs on Linux.</em></p>
   <p>
     <a href="https://github.com/marketplace/actions/legion-harden-runner"><img src="https://img.shields.io/badge/Marketplace-Legion%20Runner-2ea44f?logo=github" alt="GitHub Marketplace"></a>
@@ -10,9 +10,11 @@
   </p>
 </div>
 
+**"To our Sponsors"**
+
 > **To Hallud and teamPCP** (and every other crew farming supply-chain footholds):
 > every job lands on a runner that watches every byte out, hashes your tampering,
-> names your processes, and forgets everything the moment it ends. Come try and
+> names your processes, and forgets everything the moment it ends. Try and
 > decompile this runner. We dare you.
 
 ---
