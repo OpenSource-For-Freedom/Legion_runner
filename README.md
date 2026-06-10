@@ -3,20 +3,21 @@
   <h1>Legion Runner</h1>
   <p><strong>"Not your standard Actions Runner" - Legion</strong></p>
   <p><em>Harden any GitHub Actions runner: monitor and block egress, detect tampering, attribute connections to processes. Open, dependency-free, runs on Linux.</em></p>
-</div>
-<p><strong> "To our Sponsors"</p>
-> **To Hallud and teamPCP** (and every other crew farming supply-chain
-> footholds): every job lands on a runner that watches every byte out, hashes
-> your tampering, names your processes, and forgets everything the moment it ends.
-> Try and decompile this runner. We dare you.
-
-<div align="center">
   <p>
     <a href="https://github.com/marketplace/actions/legion-harden-runner"><img src="https://img.shields.io/badge/Marketplace-Legion%20Runner-2ea44f?logo=github" alt="GitHub Marketplace"></a>
     <a href="https://github.com/OpenSource-For-Freedom/legion_runner/releases/latest"><img src="https://img.shields.io/badge/release-latest-22c55e?logo=github" alt="Latest release"></a>
     <img src="https://img.shields.io/badge/license-MIT-blue" alt="License: MIT">
   </p>
 </div>
+
+**"To our Sponsors"**
+
+> **To Hallud and teamPCP** (and every other crew farming supply-chain footholds):
+> every job lands on a runner that watches every byte out, hashes your tampering,
+> names your processes, and forgets everything the moment it ends. Try and
+> decompile this runner. We dare you.
+
+---
 
 **Legion Runner is a GitHub Action that hardens your CI.** It's an open,
 dependency-free alternative to proprietary runner-hardening agents. Drop it in as
@@ -41,106 +42,34 @@ steps:
   - run: ./build.sh
 ```
 
-[Jump to the Action docs](#use-as-a-github-action).
+> This repo also ships a companion **ephemeral, single-use self-hosted runner** (a
+> Rust control plane). To harden GitHub-hosted runners you only need the Action
+> above; the self-hosted platform is documented in
+> [Ephemeral self-hosted runner](#ephemeral-self-hosted-runner).
 
-<details>
-<summary><strong>Also in this repo: an ephemeral self-hosted runner</strong> (a companion control plane)</summary>
+## Why Rust?
 
-A Rust control plane (`legionr`) mints just-in-time runner credentials and runs
-**single-use** runners. Every job lands on a fresh runner that accepts exactly
-one job and then self-destructs, so no credentials, caches, or implanted tooling
-survive between jobs. A Bash + systemd backbone locks the host down. This is a
-separate, optional product; the sections below (Quick start / CLI / Architecture)
-document it. To harden GitHub-hosted runners you only need the Action above.
-</details>
+A security tool shouldn't itself become the weak link. The parts of Legion Runner
+that do the sensitive work, watching every network connection and hashing files
+to catch tampering, are written in Rust, and that choice buys real safety:
 
-## Why ephemeral + single-use
-
-A long-lived self-hosted runner is a soft target: one malicious job can drop a
-backdoor, poison a cache, or harvest the next job's secrets. Legion Runner
-removes the persistence surface entirely:
-
-- **JIT credentials.** GitHub issues a just-in-time config bound to one runner
-  identity. It cannot re-register.
-- **One job, then gone.** The runner exits after a single job; systemd restarts
-  it, which provisions a brand-new runner. A single unit becomes a continuous,
-  self-renewing pool.
-- **Workspace wiped.** `_work` is cleared on teardown, every time.
-- **Defense in depth.** A `systemd-analyze security`-grade unit, kernel sysctl
-  hardening, a default-deny egress allowlist, and an optional rootless container
-  sandbox per job.
-
-## Architecture
-
-```
-            +------------------------- Linux host -------------------------+
-            |                                                              |
-  GitHub <--+  legionr (Rust control plane)                                |
-   API      |    provision -> mint JIT cred -> run ONE job -> wipe -> loop |
-            |        |                                  |                  |
-            |        | hardened systemd unit            | Legion link      |
-            |        v (non-root, seccomp, no-new-privs) v (lifecycle)     |
-            |   official actions/runner          Legion desktop dashboard  |
-            |   (optionally inside a rootless Podman/Docker sandbox)       |
-            +--------------------------------------------------------------+
-```
-
-| Component | Crate / file | Role |
-|-----------|--------------|------|
-| Control plane | `crates/legionr-cli` (`legionr`) | provision · run · harden · pair · status · doctor |
-| Core engine | `crates/legionr-core` | GitHub JIT API · lifecycle · hardening generators · Legion link |
-| Backbone | `scripts/install.sh`, `scripts/harden.sh` | service user · runner fetch · systemd · sysctl · nftables |
-| Unit | `systemd/legionr@.service` | the hardened, single-use service template |
-
-## Quick start
-
-```bash
-# 1. Install (creates the legionr user, fetches the official runner, builds legionr)
-sudo ./scripts/install.sh
-
-# 2. Point a runner at a repo or org (token never touches disk)
-export LEGIONR_TOKEN=<github PAT with manage-runners>
-sudo -u legionr -E legionr provision OpenSource-For-Freedom/legion_runner \
-     --config /etc/legion-runner/default.json \
-     --container podman \
-     --link http://127.0.0.1:3000
-
-# 3. Harden the host (systemd unit + sysctl + default-deny egress firewall)
-sudo ./scripts/harden.sh
-
-# 4. Light it up. A self-renewing pool of single-use runners.
-sudo systemctl enable --now legionr@default
-journalctl -u legionr@default -f
-```
-
-Then target it from any workflow:
-
-```yaml
-jobs:
-  build:
-    runs-on: [self-hosted, linux, legion, ephemeral]
-```
-
-## CLI
-
-| Command | What it does |
-|---------|--------------|
-| `legionr provision <owner/repo\|org>` | Write a hardened runner config (validates token, no secrets on disk). |
-| `legionr run [--once]` | Provision, run one job, teardown, looping (or once, for systemd). |
-| `legionr harden [--install]` | Emit (or install) the systemd unit, sysctl drop-in, and nftables ruleset. |
-| `legionr pair [--link URL]` | Test or repoint the Legion desktop link. |
-| `legionr status` | Show config + GitHub/Legion connectivity. |
-| `legionr doctor` | Preflight checks before going live. |
+- **Memory-safe by design.** Rust rules out the bug class (buffer overflows,
+  use-after-free) behind most exploits in tools written in C. A guard that can't
+  be turned into a way in.
+- **One small, fast binary.** No interpreter or runtime to install, update, or
+  trust, and nothing vendored. It drops onto a runner and just works, with little
+  enough overhead to run on every job.
+- **Auditable.** The privileged logic lives in a compact, compiled binary you can
+  read end to end, which is the whole point when you dared someone to decompile it.
 
 ## Use as a GitHub Action
 
-Legion Runner ships a drop-in workflow action that hardens any job, including
-GitHub-hosted runners. It monitors (and optionally blocks) outbound network
-traffic, then prints every outbound connection as a markdown table in the job
-summary. Features: **socket-layer eBPF capture** (process attribution,
-bypass-proof), **dynamic allow-by-domain** blocking, **self-contained
-learn-then-enforce** (no external service), and **file-integrity / tamper
-detection**.
+The action hardens any job, including GitHub-hosted runners. It monitors (and
+optionally blocks) outbound network traffic, then prints every outbound
+connection as a markdown table in the job summary. Features: **socket-layer eBPF
+capture** (process attribution, bypass-proof), **dynamic allow-by-domain**
+blocking, **self-contained learn-then-enforce** (no external service), and
+**file-integrity / tamper detection**.
 
 ```yaml
 steps:
@@ -173,6 +102,8 @@ agent is active):
 > | Destination | Address |
 > |---|---|
 > | telemetry.example.net | `203.0.113.7:443` |
+
+### Inputs
 
 | Input | Default | Description |
 |-------|---------|-------------|
@@ -268,7 +199,97 @@ compiled Rust binary ([`crates/legionr-fim`](crates/legionr-fim)) attached to ea
 release and fetched on demand; it degrades to a silent skip if the binary can't be
 obtained.
 
-## Hardening at a glance
+---
+
+## Ephemeral self-hosted runner
+
+The action above hardens *any* runner. This repo also ships a full **ephemeral,
+single-use self-hosted runner** platform: a Rust control plane (`legionr`) that
+mints just-in-time runner credentials and supervises the lifecycle, a Bash +
+systemd backbone that locks the host down, and an optional **Legion link** that
+heartbeats every runner's lifecycle to the [Legion](https://github.com/OpenSource-For-Freedom/legion)
+desktop dashboard. It's an optional, separate product; you don't need it to use
+the Action.
+
+### Why ephemeral + single-use
+
+A long-lived self-hosted runner is a soft target: one malicious job can drop a
+backdoor, poison a cache, or harvest the next job's secrets. Legion Runner
+removes the persistence surface entirely:
+
+- **JIT credentials.** GitHub issues a just-in-time config bound to one runner
+  identity. It cannot re-register.
+- **One job, then gone.** The runner exits after a single job; systemd restarts
+  it, which provisions a brand-new runner. A single unit becomes a continuous,
+  self-renewing pool.
+- **Workspace wiped.** `_work` is cleared on teardown, every time.
+- **Defense in depth.** A `systemd-analyze security`-grade unit, kernel sysctl
+  hardening, a default-deny egress allowlist, and an optional rootless container
+  sandbox per job.
+
+### Architecture
+
+```
+            +------------------------- Linux host -------------------------+
+            |                                                              |
+  GitHub <--+  legionr (Rust control plane)                               |
+   API      |    provision -> mint JIT cred -> run ONE job -> wipe -> loop |
+            |        |                                  |                  |
+            |        | hardened systemd unit            | Legion link      |
+            |        v (non-root, seccomp, no-new-privs) v (lifecycle)     |
+            |   official actions/runner          Legion desktop dashboard  |
+            |   (optionally inside a rootless Podman/Docker sandbox)        |
+            +--------------------------------------------------------------+
+```
+
+| Component | Crate / file | Role |
+|-----------|--------------|------|
+| Control plane | `crates/legionr-cli` (`legionr`) | provision · run · harden · pair · status · doctor |
+| Core engine | `crates/legionr-core` | GitHub JIT API · lifecycle · hardening generators · Legion link |
+| Backbone | `scripts/install.sh`, `scripts/harden.sh` | service user · runner fetch · systemd · sysctl · nftables |
+| Unit | `systemd/legionr@.service` | the hardened, single-use service template |
+
+### Quick start
+
+```bash
+# 1. Install (creates the legionr user, fetches the official runner, builds legionr)
+sudo ./scripts/install.sh
+
+# 2. Point a runner at a repo or org (token never touches disk)
+export LEGIONR_TOKEN=<github PAT with manage-runners>
+sudo -u legionr -E legionr provision OpenSource-For-Freedom/legion_runner \
+     --config /etc/legion-runner/default.json \
+     --container podman \
+     --link http://127.0.0.1:3000
+
+# 3. Harden the host (systemd unit + sysctl + default-deny egress firewall)
+sudo ./scripts/harden.sh
+
+# 4. Light it up. A self-renewing pool of single-use runners.
+sudo systemctl enable --now legionr@default
+journalctl -u legionr@default -f
+```
+
+Then target it from any workflow:
+
+```yaml
+jobs:
+  build:
+    runs-on: [self-hosted, linux, legion, ephemeral]
+```
+
+### CLI
+
+| Command | What it does |
+|---------|--------------|
+| `legionr provision <owner/repo\|org>` | Write a hardened runner config (validates token, no secrets on disk). |
+| `legionr run [--once]` | Provision, run one job, teardown, looping (or once, for systemd). |
+| `legionr harden [--install]` | Emit (or install) the systemd unit, sysctl drop-in, and nftables ruleset. |
+| `legionr pair [--link URL]` | Test or repoint the Legion desktop link. |
+| `legionr status` | Show config + GitHub/Legion connectivity. |
+| `legionr doctor` | Preflight checks before going live. |
+
+### Hardening at a glance
 
 - **Identity:** dedicated non-root `legionr` user; `root` is refused outright.
 - **systemd sandbox:** `NoNewPrivileges`, empty `CapabilityBoundingSet`,
@@ -284,7 +305,7 @@ obtained.
 
 Verify the unit's exposure with `systemd-analyze security legionr@default`.
 
-## Requirements
+### Requirements
 
 - Linux with systemd (and `nftables` for the egress firewall).
 - [Rust](https://rustup.rs) 1.78+ to build `legionr`.
