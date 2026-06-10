@@ -296,6 +296,32 @@ function applyEgressBlock(ipv4, ipv6) {
   }
 }
 
+/// Remove the block-mode firewall so the runner's own teardown egress (it must
+/// reach GitHub to report job completion / upload logs) isn't dropped. Leaving
+/// LEGION_EGRESS in OUTPUT past the job hangs the runner at finalization — the
+/// rotating GitHub-backend IPs aren't in the static seed. Best-effort, both
+/// families. Removing the OUTPUT jump first is what restores normal egress.
+function removeEgressBlock() {
+  const CHAIN = "LEGION_EGRESS";
+  for (const bin of ["iptables", "ip6tables"]) {
+    try {
+      sudo([bin, "-D", "OUTPUT", "-j", CHAIN]);
+    } catch {
+      /* jump already gone */
+    }
+    try {
+      sudo([bin, "-F", CHAIN]);
+    } catch {
+      /* chain already gone */
+    }
+    try {
+      sudo([bin, "-X", CHAIN]);
+    } catch {
+      /* chain in use / already gone */
+    }
+  }
+}
+
 /// Parse denied destinations from kernel-log lines our LOG rule emitted.
 /// Pure (testable): returns unique "ip:port" strings.
 function parseDeniedLog(text) {
@@ -723,6 +749,11 @@ async function post() {
   }
   stopDnsCapture(st.dns);
   stopEbpf(st.ebpf);
+
+  // Remove the block-mode firewall NOW, before the runner finalizes — otherwise
+  // its default-deny drops the runner's own completion call and the job hangs.
+  // The denied list below reads the kernel log, which persists past chain removal.
+  if (st.enforced) removeEgressBlock();
 
   // Tally observed peers as ip|port. Prefer the eBPF connect log (reliable +
   // process names); fall back to the ss//proc sampler. procMap: ip -> Set(comm).
