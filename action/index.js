@@ -1006,6 +1006,27 @@ async function post() {
   md += `**Resolution:** ${captureMode}  ·  `;
   md += `**Started:** ${st.startedAt}\n\n`;
 
+  // Diagnostics line — shows which resolution path actually fired so a run can
+  // be triaged when names come back as bare IPs. SECURE BY CONSTRUCTION: emits
+  // only booleans, counts, and a fixed enum — never the upstream resolver IP,
+  // file paths, captured hostnames, or any env value. (The upstream IP isn't
+  // even persisted to state, so it can't leak here.)
+  const dnsActive = !!(st.dns && st.dns.active);
+  const gaiRoute = !dnsActive
+    ? "n/a (reverse DNS)"
+    : st.dns.nsswitchBackup
+      ? "nsswitch"
+      : st.dns.resolvedDropin
+        ? "systemd-resolved"
+        : st.dns.nsswitchTried
+          ? "unredirected (bypass detected)"
+          : "default";
+  const named = rows.length - unresolved;
+  md += `<sub>**Diagnostics:** forwarder ${dnsActive ? "on" : "off"} · `;
+  md += `captured DNS records ${Object.keys(dnsMap).length} · `;
+  md += `getaddrinfo route ${gaiRoute} · `;
+  md += `named ${named}/${rows.length} destinations</sub>\n\n`;
+
   const procCol = usedEbpf; // process attribution only available via eBPF
   if (rows.length === 0) {
     md += "_No outbound connections were observed during this run._\n";
